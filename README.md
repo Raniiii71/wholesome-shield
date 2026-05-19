@@ -16,25 +16,36 @@ You can still use **WholesomeShield** as the public display name in descriptions
 
 - First violation: remove content, leave a warning comment, send a private warning, save one violation.
 - Second violation: remove content, leave a final warning, send a final private warning, ban the user from that subreddit.
+- Clean new posts can receive a configurable thank-you comment after passing the scan.
+- Posts with 5 or more reports are removed by default, with a public reason comment, private warning, and modmail notification.
 - Automatic scans are scheduled for each subreddit when the app is installed or upgraded.
 - The manual **Shield Check** mod action remains available as a backup.
 - Clean users are not removed for weak signals like a suspicious username alone.
 - Duplicate triggers for the same content do not count as multiple violations.
+- Duplicate post-submit and post-create events do not create multiple clean-post comments.
 
 ## Moderator Settings
 
 Each subreddit installation has settings on the Reddit developer app page. Moderators can configure:
 
 - automatic moderation on or off
+- whether post scanning is enabled
+- whether comment scanning is enabled
 - whether unsafe content is removed
+- whether heavily reported posts are removed
+- the report threshold for automatic post removal, defaulting to 5
 - whether WholesomeShield leaves a public warning comment
 - whether WholesomeShield sends a private warning message
 - whether WholesomeShield comments on clean new posts
+- the clean-post thank-you comment text, with `{username}` and `{subreddit}` placeholders
 - whether repeat violators are banned
 - whether moderators receive modmail notifications for every violation, bans only, or neither
+- whether modmail includes user profile details
+- whether modmail includes removed content details
+- whether modmail includes detection details and scores
 - the automatic scan limit, capped at 100 items per scan
 
-Modmail notifications include the author profile, account age, karma, matched reasons, removed content details, and whether a ban was confirmed.
+Modmail notifications can include the author profile, account age, karma, matched reasons, report count, report reasons, removed content details, and whether a ban was confirmed.
 
 ## Detection
 

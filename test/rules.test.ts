@@ -69,6 +69,25 @@ describe('WholesomeShield rules', () => {
     expect(result.shouldRemove).toBe(true);
     expect(result.reasons.map((reason) => reason.category)).toContain('telegram-spam');
   });
+
+  it('removes posts that reach the report threshold', () => {
+    const result = detectRuleViolations(
+      {
+        kind: 'post',
+        id: 't3_reported',
+        authorName: 'reported_user',
+        title: 'Normal looking title',
+        reportCount: 5,
+      },
+      {
+        removeReportedPosts: true,
+        reportRemovalThreshold: 5,
+      }
+    );
+
+    expect(result.shouldRemove).toBe(true);
+    expect(result.reasons.map((reason) => reason.category)).toContain('reports');
+  });
 });
 
 describe('moderation workflow', () => {
@@ -81,6 +100,20 @@ describe('moderation workflow', () => {
 
     expect(text).toContain('Thank you u/friendly_user for posting on this subreddit!');
     expect(text).toContain('I am a bot, and this action was performed automatically.');
+  });
+
+  it('formats custom clean post thank-you templates', () => {
+    const text = cleanPostThankYouComment(
+      {
+        kind: 'post',
+        id: 't3_clean_custom',
+        authorName: 'friendly_user',
+        subredditName: 'wholesome',
+      },
+      'Thanks {username} for posting in {subreddit}.'
+    );
+
+    expect(text).toBe('Thanks u/friendly_user for posting in r/wholesome.');
   });
 
   it('warns first and bans on the second violation', async () => {

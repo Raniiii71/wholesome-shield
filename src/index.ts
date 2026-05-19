@@ -7,7 +7,12 @@ import { serve } from '@hono/node-server';
 import { Hono, type Context } from 'hono';
 
 import { cleanPostThankYouComment } from './server/messages';
-import { moderateItem, type ModerationOptions, type ModerationRuntime } from './server/moderation';
+import {
+  moderateItem,
+  type ModerationOptions,
+  type ModerationRuntime,
+  type ModeratorNotificationContext,
+} from './server/moderation';
 import { commentFromPayload, isValidModerationItem, postFromPayload } from './server/payload';
 import { getWholesomeShieldSettings, type WholesomeShieldSettings } from './server/settings';
 import type { DetectionResult, ModerationItem, ViolationAction, ViolationState } from './server/types';
@@ -98,6 +103,12 @@ app.post('/internal/triggers/post-create', async (c) => {
   return handleModeration('post-create', item, c);
 });
 
+app.post('/internal/triggers/post-report', async (c) => {
+  const payload = await c.req.json<Record<string, unknown>>();
+  const item = await hydratePostItem(postFromPayload(payload));
+  return handleModeration('post-report', item, c);
+});
+
 app.post('/internal/triggers/comment-submit', async (c) => {
   const payload = await c.req.json<Record<string, unknown>>();
   const item = commentFromPayload(payload);
@@ -108,6 +119,12 @@ app.post('/internal/triggers/comment-create', async (c) => {
   const payload = await c.req.json<Record<string, unknown>>();
   const item = commentFromPayload(payload);
   return handleModeration('comment-create', item, c);
+});
+
+app.post('/internal/triggers/comment-report', async (c) => {
+  const payload = await c.req.json<Record<string, unknown>>();
+  const item = await hydrateCommentItem(commentFromPayload(payload));
+  return handleModeration('comment-report', item, c);
 });
 
 app.post('/internal/triggers/post-nsfw-update', async (c) => {
@@ -163,6 +180,11 @@ async function handleModeration(triggerName: string, item: ModerationItem | unde
     return c.json<TriggerResponse>({ status: 'ignored' }, 200);
   }
 
+  if (!shouldModerateItem(item, moderationSettings)) {
+    console.log(`WholesomeShield skipped ${triggerName}: ${item.kind} scanning is off for ${item.id}`);
+    return c.json<TriggerResponse>({ status: 'ignored' }, 200);
+  }
+
   const decision = await moderateItem(item, redditRuntime, moderationOptionsFromSettings(moderationSettings));
   console.log(
     `WholesomeShield ${triggerName}: ${decision.shouldRemove ? 'removed' : 'allowed'} ${item.kind} ${item.id} by u/${
@@ -171,7 +193,7 @@ async function handleModeration(triggerName: string, item: ModerationItem | unde
   );
 
   if (!decision.shouldRemove && shouldCommentOnCleanPost(triggerName, item, moderationSettings)) {
-    await commentOnCleanPostOnce(item);
+    await commentOnCleanPostOnce(item, moderationSettings);
   }
 
   return c.json<TriggerResponse>(
@@ -239,6 +261,11 @@ async function scanSubreddit(subredditName: string, requestedLimit: number): Pro
 
     try {
       const moderationSettings = await getWholesomeShieldSettings();
+      if (!shouldModerateItem(item, moderationSettings)) {
+        result.skipped += 1;
+        continue;
+      }
+
       const decision = await moderateItem(item, redditRuntime, moderationOptionsFromSettings(moderationSettings));
       await rememberScan(memoryKey, fingerprint);
       result.checked += 1;
@@ -267,24 +294,26 @@ async function getScanCandidates(subredditName: string, limit: number): Promise<
   const seen = new Set<string>();
   const candidates: Array<Post | Comment> = [];
 
-  const unmoderatedItems = await reddit.getUnmoderated({ subreddit: subredditName, type: 'all', limit }).get(limit);
-  for (const item of unmoderatedItems) {
-    if (!seen.has(item.id)) {
-      seen.add(item.id);
-      candidates.push(item);
+  const addCandidates = (items: Array<Post | Comment>) => {
+    for (const item of items) {
+      if (!seen.has(item.id)) {
+        seen.add(item.id);
+        candidates.push(item);
+      }
     }
-  }
+  };
+
+  const reportedItems = await reddit.getReports({ subreddit: subredditName, type: 'all', limit }).get(limit);
+  addCandidates(reportedItems);
+
+  const unmoderatedItems = await reddit.getUnmoderated({ subreddit: subredditName, type: 'all', limit }).get(limit);
+  addCandidates(unmoderatedItems);
 
   const newPostsLimit = Math.min(limit, 25);
   const newPosts = await reddit
     .getNewPosts({ subredditName, limit: newPostsLimit, pageSize: newPostsLimit })
     .get(newPostsLimit);
-  for (const post of newPosts) {
-    if (!seen.has(post.id)) {
-      seen.add(post.id);
-      candidates.push(post);
-    }
-  }
+  addCandidates(newPosts);
 
   return candidates.slice(0, limit);
 }
@@ -315,6 +344,8 @@ function itemFromPost(post: Post): ModerationItem {
     nsfw: post.nsfw,
     permalink: post.permalink,
     mediaUrls: post.gallery.map((media) => media.url),
+    reportCount: post.numberOfReports,
+    reportReasons: reportReasonsFromThing(post),
   };
 }
 
@@ -328,7 +359,51 @@ function itemFromComment(comment: Comment): ModerationItem {
     body: comment.body,
     permalink: comment.permalink,
     mediaUrls: [],
+    reportCount: comment.numReports,
+    reportReasons: reportReasonsFromThing(comment),
   };
+}
+
+function reportReasonsFromThing(thing: Post | Comment): string[] | undefined {
+  const reasons = [...thing.userReportReasons, ...thing.modReportReasons].filter(Boolean);
+  return reasons.length > 0 ? reasons : undefined;
+}
+
+async function hydratePostItem(item: ModerationItem | undefined): Promise<ModerationItem | undefined> {
+  if (!item) return undefined;
+
+  try {
+    const post = await reddit.getPostById(thingId(item) as `t3_${string}`);
+    return mergeReportMetadata(item, itemFromPost(post));
+  } catch (error) {
+    console.error(`WholesomeShield could not hydrate reported post ${item.id}; using trigger payload.`, error);
+    return item;
+  }
+}
+
+async function hydrateCommentItem(item: ModerationItem | undefined): Promise<ModerationItem | undefined> {
+  if (!item) return undefined;
+
+  try {
+    const comment = await reddit.getCommentById(thingId(item) as `t1_${string}`);
+    return mergeReportMetadata(item, itemFromComment(comment));
+  } catch (error) {
+    console.error(`WholesomeShield could not hydrate reported comment ${item.id}; using trigger payload.`, error);
+    return item;
+  }
+}
+
+function mergeReportMetadata(triggerItem: ModerationItem, hydratedItem: ModerationItem): ModerationItem {
+  return {
+    ...hydratedItem,
+    reportCount: Math.max(triggerItem.reportCount ?? 0, hydratedItem.reportCount ?? 0),
+    reportReasons: mergeReportReasons(triggerItem.reportReasons, hydratedItem.reportReasons),
+  };
+}
+
+function mergeReportReasons(...reasonSets: Array<string[] | undefined>): string[] | undefined {
+  const reasons = [...new Set(reasonSets.flatMap((reasonSet) => reasonSet ?? []).filter(Boolean))];
+  return reasons.length > 0 ? reasons : undefined;
 }
 
 const redditRuntime: ModerationRuntime = {
@@ -411,11 +486,21 @@ const redditRuntime: ModerationRuntime = {
 function moderationOptionsFromSettings(settings: Awaited<ReturnType<typeof getWholesomeShieldSettings>>): ModerationOptions {
   return {
     removeContent: settings.remove_unsafe_content,
+    removeReportedPosts: settings.remove_reported_posts,
+    reportRemovalThreshold: settings.report_removal_threshold,
     leaveWarningComment: settings.leave_warning_comment,
     sendPrivateWarning: settings.send_private_warning,
     banRepeatViolators: settings.ban_repeat_violators,
     modmailNotifications: settings.modmail_notifications,
+    includeProfileDetailsInModmail: settings.include_profile_details_in_modmail,
+    includeContentDetailsInModmail: settings.include_content_details_in_modmail,
+    includeDetectionDetailsInModmail: settings.include_detection_details_in_modmail,
   };
+}
+
+function shouldModerateItem(item: ModerationItem, settings: WholesomeShieldSettings): boolean {
+  if (item.kind === 'post') return settings.moderate_posts;
+  return settings.moderate_comments;
 }
 
 function shouldCommentOnCleanPost(
@@ -430,7 +515,7 @@ function shouldCommentOnCleanPost(
   );
 }
 
-async function commentOnCleanPostOnce(item: ModerationItem): Promise<void> {
+async function commentOnCleanPostOnce(item: ModerationItem, settings: WholesomeShieldSettings): Promise<void> {
   const markerKey = cleanPostCommentKey(item);
   const marker = await redis.set(markerKey, new Date().toISOString(), {
     nx: true,
@@ -442,7 +527,7 @@ async function commentOnCleanPostOnce(item: ModerationItem): Promise<void> {
   }
 
   try {
-    await redditRuntime.reply(item, cleanPostThankYouComment(item));
+    await redditRuntime.reply(item, cleanPostThankYouComment(item, settings.clean_post_comment_message));
     console.log(`WholesomeShield thanked clean post ${item.id} by u/${item.authorName ?? 'unknown'}`);
   } catch (error) {
     await redis.del(markerKey);
@@ -462,9 +547,8 @@ async function modmailBody(
   item: ModerationItem,
   detection: DetectionResult,
   action: ViolationAction,
-  context: { violationCount: number; banAttempted: boolean; banApplied: boolean }
+  context: ModeratorNotificationContext
 ): Promise<string> {
-  const profileDetails = await userProfileDetails(item);
   const target = item.permalink ? `[View ${item.kind}](${item.permalink})` : `${item.kind} ${item.id}`;
   const actionText =
     action === 'ban'
@@ -473,7 +557,7 @@ async function modmailBody(
         : 'Repeat violation detected, but the ban could not be confirmed.'
       : 'User warned for first violation.';
 
-  return [
+  const sections = [
     '**WholesomeShield moderator notification**',
     '',
     `Subreddit: r/${item.subredditName ?? 'unknown'}`,
@@ -482,16 +566,21 @@ async function modmailBody(
     `Detection score: ${detection.score}`,
     `Spam removal flag: ${detection.isSpam ? 'yes' : 'no'}`,
     `Content: ${target}`,
-    '',
-    '**Matched reasons**',
-    formatDetailedReasons(detection),
-    '',
-    '**Removed content details**',
-    contentDetails(item),
-    '',
-    '**User profile details**',
-    profileDetails,
-  ].join('\n');
+  ];
+
+  if (context.includeDetectionDetails) {
+    sections.push('', '**Matched reasons**', formatDetailedReasons(detection));
+  }
+
+  if (context.includeContentDetails) {
+    sections.push('', '**Removed content details**', contentDetails(item));
+  }
+
+  if (context.includeProfileDetails) {
+    sections.push('', '**User profile details**', await userProfileDetails(item));
+  }
+
+  return sections.join('\n');
 }
 
 async function userProfileDetails(item: ModerationItem): Promise<string> {
@@ -567,6 +656,8 @@ function contentDetails(item: ModerationItem): string {
     `- Flair/tag: ${item.flairText ?? 'none'}`,
     `- Marked NSFW: ${yesNo(item.nsfw === true)}`,
     `- Media URLs: ${item.mediaUrls?.length ? item.mediaUrls.join(', ') : 'none'}`,
+    `- Report count: ${item.reportCount ?? 0}`,
+    `- Report reasons: ${item.reportReasons?.length ? item.reportReasons.join(', ') : 'none'}`,
   ].join('\n');
 }
 
@@ -634,6 +725,8 @@ function scanFingerprint(item: ModerationItem): string {
     flairText: item.flairText ?? '',
     nsfw: item.nsfw ?? false,
     mediaUrls: item.mediaUrls ?? [],
+    reportCount: item.reportCount ?? 0,
+    reportReasons: item.reportReasons ?? [],
   });
 }
 
@@ -658,6 +751,8 @@ async function itemFromMenuRequest(payload: MenuItemRequest): Promise<Moderation
       nsfw: post.nsfw,
       permalink: post.permalink,
       mediaUrls: post.gallery.map((media) => media.url),
+      reportCount: post.numberOfReports,
+      reportReasons: reportReasonsFromThing(post),
     };
   }
 
@@ -672,6 +767,8 @@ async function itemFromMenuRequest(payload: MenuItemRequest): Promise<Moderation
       body: comment.body,
       permalink: comment.permalink,
       mediaUrls: [],
+      reportCount: comment.numReports,
+      reportReasons: reportReasonsFromThing(comment),
     };
   }
 

@@ -12,7 +12,8 @@ export type ViolationCategory =
   | 'suspicious-username'
   | 'bad-flair'
   | 'nsfw-flag'
-  | 'media';
+  | 'media'
+  | 'reports';
 
 export type ModerationItem = {
   kind: ContentKind;
@@ -27,6 +28,8 @@ export type ModerationItem = {
   nsfw?: boolean | undefined;
   permalink?: string | undefined;
   mediaUrls?: string[] | undefined;
+  reportCount?: number | undefined;
+  reportReasons?: string[] | undefined;
 };
 
 export type ViolationReason = {

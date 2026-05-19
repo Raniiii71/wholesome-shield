@@ -8,6 +8,9 @@ export type ModeratorNotificationContext = {
   violationCount: number;
   banAttempted: boolean;
   banApplied: boolean;
+  includeProfileDetails: boolean;
+  includeContentDetails: boolean;
+  includeDetectionDetails: boolean;
 };
 
 export type ModerationRuntime = {
@@ -27,26 +30,40 @@ export type ModerationRuntime = {
 
 export type ModerationOptions = {
   removeContent: boolean;
+  removeReportedPosts: boolean;
+  reportRemovalThreshold: number;
   leaveWarningComment: boolean;
   sendPrivateWarning: boolean;
   banRepeatViolators: boolean;
   modmailNotifications: ModmailNotificationLevel;
+  includeProfileDetailsInModmail: boolean;
+  includeContentDetailsInModmail: boolean;
+  includeDetectionDetailsInModmail: boolean;
 };
 
 export const DEFAULT_MODERATION_OPTIONS: ModerationOptions = {
   removeContent: true,
+  removeReportedPosts: true,
+  reportRemovalThreshold: 5,
   leaveWarningComment: true,
   sendPrivateWarning: true,
   banRepeatViolators: true,
   modmailNotifications: 'bans_only',
+  includeProfileDetailsInModmail: true,
+  includeContentDetailsInModmail: true,
+  includeDetectionDetailsInModmail: true,
 };
 
 export async function moderateItem(
   item: ModerationItem,
   runtime: ModerationRuntime,
-  options: ModerationOptions = DEFAULT_MODERATION_OPTIONS
+  options: Partial<ModerationOptions> = {}
 ): Promise<ModerationDecision> {
-  const detection = await evaluateItem(item);
+  const moderationOptions = {
+    ...DEFAULT_MODERATION_OPTIONS,
+    ...options,
+  };
+  const detection = await evaluateItem(item, moderationOptions);
 
   if (!detection.shouldRemove) {
     return {
@@ -66,15 +83,15 @@ export async function moderateItem(
   const nextCount = previousState.count + 1;
   const action: ViolationAction = nextCount >= 2 ? 'ban' : 'warn';
 
-  if (options.removeContent) {
+  if (moderationOptions.removeContent) {
     await runtime.remove(item, detection.isSpam);
   }
 
-  if (options.leaveWarningComment) {
+  if (moderationOptions.leaveWarningComment) {
     await runtime.reply(item, publicWarningComment(item, detection.reasons, nextCount));
   }
 
-  if (options.sendPrivateWarning) {
+  if (moderationOptions.sendPrivateWarning) {
     await runtime.message(
       item,
       nextCount >= 2 ? 'Final warning from WholesomeShield' : 'Warning from WholesomeShield',
@@ -89,16 +106,19 @@ export async function moderateItem(
   });
 
   let banApplied = false;
-  const banAttempted = action === 'ban' && options.banRepeatViolators;
-  if (action === 'ban' && options.banRepeatViolators) {
+  const banAttempted = action === 'ban' && moderationOptions.banRepeatViolators;
+  if (action === 'ban' && moderationOptions.banRepeatViolators) {
     banApplied = await runtime.ban(item, banMessage(item, detection.reasons));
   }
 
-  if (shouldNotifyModerators(options.modmailNotifications, action, banAttempted) && runtime.notifyMods) {
+  if (shouldNotifyModerators(moderationOptions.modmailNotifications, action, banAttempted) && runtime.notifyMods) {
     await runtime.notifyMods(item, detection, action, {
       violationCount: nextCount,
       banAttempted,
       banApplied,
+      includeProfileDetails: moderationOptions.includeProfileDetailsInModmail,
+      includeContentDetails: moderationOptions.includeContentDetailsInModmail,
+      includeDetectionDetails: moderationOptions.includeDetectionDetailsInModmail,
     });
   }
 
@@ -108,8 +128,14 @@ export async function moderateItem(
   };
 }
 
-export async function evaluateItem(item: ModerationItem): Promise<DetectionResult> {
-  const textDetection = detectRuleViolations(item);
+export async function evaluateItem(
+  item: ModerationItem,
+  options: Pick<ModerationOptions, 'removeReportedPosts' | 'reportRemovalThreshold'> = DEFAULT_MODERATION_OPTIONS
+): Promise<DetectionResult> {
+  const textDetection = detectRuleViolations(item, {
+    removeReportedPosts: options.removeReportedPosts,
+    reportRemovalThreshold: options.reportRemovalThreshold,
+  });
   const mediaDetection = await scanMedia(item);
   return combineDetections(textDetection, mediaDetection);
 }

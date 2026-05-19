@@ -24,11 +24,35 @@
         "helpText": "Automatically scan new posts and comments for unsafe content.",
         "defaultValue": true
       },
+      "moderate_posts": {
+        "type": "boolean",
+        "label": "Scan posts",
+        "helpText": "Scan new posts, post updates, report events, and recent post scans.",
+        "defaultValue": true
+      },
+      "moderate_comments": {
+        "type": "boolean",
+        "label": "Scan comments",
+        "helpText": "Scan new comments, comment report events, and unmoderated comments.",
+        "defaultValue": true
+      },
       "remove_unsafe_content": {
         "type": "boolean",
         "label": "Remove unsafe content",
         "helpText": "Remove posts and comments when WholesomeShield detects a high-confidence violation.",
         "defaultValue": true
+      },
+      "remove_reported_posts": {
+        "type": "boolean",
+        "label": "Remove heavily reported posts",
+        "helpText": "Automatically remove posts when they reach the report threshold.",
+        "defaultValue": true
+      },
+      "report_removal_threshold": {
+        "type": "number",
+        "label": "Report removal threshold",
+        "helpText": "Remove a post after this many reports. Default is 5; values above 100 are capped.",
+        "defaultValue": 5
       },
       "leave_warning_comment": {
         "type": "boolean",
@@ -47,6 +71,12 @@
         "label": "Comment on clean posts",
         "helpText": "Leave an automatic thank-you comment on new posts that pass WholesomeShield scanning.",
         "defaultValue": true
+      },
+      "clean_post_comment_message": {
+        "type": "paragraph",
+        "label": "Clean post comment message",
+        "helpText": "Customize the automatic thank-you comment. Use {username} for the author and {subreddit} for the community.",
+        "defaultValue": "Thank you {username} for posting on this subreddit! Hope it follows our Rules and Guidelines.\n\nThank you for being amazing, y'all and hope everyone has a great day <3\n\nI am a bot, and this action was performed automatically. Please contact the moderators of this subreddit if you have any questions or concerns."
       },
       "ban_repeat_violators": {
         "type": "boolean",
@@ -74,6 +104,24 @@
         ],
         "defaultValue": "all_violations"
       },
+      "include_profile_details_in_modmail": {
+        "type": "boolean",
+        "label": "Modmail user profile details",
+        "helpText": "Include username, author ID, profile link, account age, karma, NSFW flag, and subreddit karma when available.",
+        "defaultValue": true
+      },
+      "include_content_details_in_modmail": {
+        "type": "boolean",
+        "label": "Modmail content details",
+        "helpText": "Include removed content title, body, URL, flair, media URLs, report count, and report reasons.",
+        "defaultValue": true
+      },
+      "include_detection_details_in_modmail": {
+        "type": "boolean",
+        "label": "Modmail detection details",
+        "helpText": "Include matched WholesomeShield reasons and scores in moderator notifications.",
+        "defaultValue": true
+      },
       "scan_limit": {
         "type": "number",
         "label": "Automatic scan limit",
@@ -87,8 +135,10 @@
     "onAppUpgrade": "/internal/triggers/app-upgrade",
     "onPostSubmit": "/internal/triggers/post-submit",
     "onPostCreate": "/internal/triggers/post-create",
+    "onPostReport": "/internal/triggers/post-report",
     "onCommentSubmit": "/internal/triggers/comment-submit",
     "onCommentCreate": "/internal/triggers/comment-create",
+    "onCommentReport": "/internal/triggers/comment-report",
     "onPostNsfwUpdate": "/internal/triggers/post-nsfw-update",
     "onPostFlairUpdate": "/internal/triggers/post-flair-update"
   },

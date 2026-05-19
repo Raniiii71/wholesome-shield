@@ -21,6 +21,8 @@ export function postFromPayload(payload: LooseRecord): ModerationItem | undefine
     nsfw: booleanValue(post.nsfw) ?? booleanValue(post.over18),
     permalink: stringValue(post.permalink),
     mediaUrls: mediaUrls(post),
+    reportCount: reportCount(post),
+    reportReasons: reportReasons(post, payload),
   };
 }
 
@@ -40,6 +42,9 @@ export function commentFromPayload(payload: LooseRecord): ModerationItem | undef
     authorName: usernameFromPayload(author) ?? stringValue(comment.authorName) ?? stringValue(comment.author),
     body,
     permalink: stringValue(comment.permalink),
+    reportCount: reportCount(comment),
+    reportReasons: reportReasons(comment, payload),
+    mediaUrls: stringArray(comment.mediaUrls),
   };
 }
 
@@ -64,6 +69,10 @@ function mediaUrls(post: LooseRecord): string[] {
   const fallbackUrl = stringValue(redditVideo.fallback_url) ?? stringValue(redditVideo.fallbackUrl);
   if (fallbackUrl) urls.add(fallbackUrl);
 
+  for (const value of [...stringArray(post.mediaUrls), ...stringArray(post.galleryImages)]) {
+    urls.add(value);
+  }
+
   return [...urls];
 }
 
@@ -81,4 +90,35 @@ function stringValue(value: unknown): string | undefined {
 
 function booleanValue(value: unknown): boolean | undefined {
   return typeof value === 'boolean' ? value : undefined;
+}
+
+function numberValue(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function reportCount(post: LooseRecord): number | undefined {
+  return numberValue(post.numberOfReports) ?? numberValue(post.numReports) ?? numberValue(post.reportCount);
+}
+
+function reportReasons(thing: LooseRecord, payload: LooseRecord): string[] | undefined {
+  const reasons = [
+    ...stringArray(thing.userReportReasons),
+    ...stringArray(thing.modReportReasons),
+    ...stringArray(thing.userReports),
+    ...stringArray(thing.modReports),
+  ];
+  const triggerReason = stringValue(payload.reason);
+  if (triggerReason) reasons.push(triggerReason);
+
+  return reasons.length > 0 ? reasons : undefined;
+}
+
+function stringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+
+  return value.flatMap((item) => {
+    if (typeof item === 'string') return [item];
+    if (Array.isArray(item)) return item.filter((nested): nested is string => typeof nested === 'string');
+    return [];
+  });
 }

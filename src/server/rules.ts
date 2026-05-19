@@ -1,6 +1,12 @@
 import type { DetectionResult, ModerationItem, ViolationReason } from './types';
 
 const REMOVE_THRESHOLD = 7;
+const DEFAULT_REPORT_REMOVAL_THRESHOLD = 5;
+
+export type RuleDetectionOptions = {
+  removeReportedPosts?: boolean;
+  reportRemovalThreshold?: number;
+};
 
 const ADULT_KEYWORDS = [
   'nsfw',
@@ -74,8 +80,11 @@ const TELEGRAM_DOMAINS = ['t.me', 'telegram.me', 'telegram.dog'];
 const SHORTENER_DOMAINS = ['bit.ly', 'tinyurl.com', 'cutt.ly', 'is.gd', 'rebrand.ly', 'shorte.st'];
 const BAD_FLAIR_TERMS = ['nsfw', '18+', 'adult', 'spicy', 'lewd', 'promo', 'advertisement'];
 
-export function detectRuleViolations(item: ModerationItem): DetectionResult {
+export function detectRuleViolations(item: ModerationItem, options: RuleDetectionOptions = {}): DetectionResult {
   const reasons: ViolationReason[] = [];
+  const reportRemovalThreshold = clampReportThreshold(
+    options.reportRemovalThreshold ?? DEFAULT_REPORT_REMOVAL_THRESHOLD
+  );
   const fields = [item.title ?? '', item.body ?? '', item.url ?? '', item.flairText ?? '', ...(item.mediaUrls ?? [])];
   const searchableText = normalizeText(fields.join(' '));
   const username = normalizeText(item.authorName ?? '');
@@ -88,6 +97,20 @@ export function detectRuleViolations(item: ModerationItem): DetectionResult {
       category: 'nsfw-flag',
       label: 'Reddit marked this post as NSFW',
       score: 9,
+    });
+  }
+
+  if (
+    item.kind === 'post' &&
+    options.removeReportedPosts !== false &&
+    typeof item.reportCount === 'number' &&
+    item.reportCount >= reportRemovalThreshold
+  ) {
+    reasons.push({
+      category: 'reports',
+      label: 'Post reached moderator report threshold',
+      score: 10,
+      evidence: `${item.reportCount} reports`,
     });
   }
 
@@ -242,6 +265,10 @@ function dedupeReasons(reasons: ViolationReason[]): ViolationReason[] {
 
 function clampScore(score: number): number {
   return Math.min(score, 20);
+}
+
+function clampReportThreshold(value: number): number {
+  return Math.max(1, Math.min(Math.floor(value), 100));
 }
 
 function escapeRegExp(value: string): string {
