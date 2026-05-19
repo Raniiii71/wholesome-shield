@@ -16,6 +16,52 @@
       }
     ]
   },
+  "settings": {
+    "subreddit": {
+      "automatic_moderation": {
+        "type": "boolean",
+        "label": "Automatic moderation",
+        "helpText": "Automatically scan new posts and comments for unsafe content.",
+        "defaultValue": true
+      },
+      "remove_unsafe_content": {
+        "type": "boolean",
+        "label": "Remove unsafe content",
+        "helpText": "Remove posts and comments when WholesomeShield detects a high-confidence violation.",
+        "defaultValue": true
+      },
+      "leave_warning_comment": {
+        "type": "boolean",
+        "label": "Leave warning comment",
+        "helpText": "Reply publicly with the rule reason when content is removed.",
+        "defaultValue": true
+      },
+      "send_private_warning": {
+        "type": "boolean",
+        "label": "Send private warning",
+        "helpText": "Send the author a private Reddit warning message after a violation.",
+        "defaultValue": true
+      },
+      "ban_repeat_violators": {
+        "type": "boolean",
+        "label": "Ban repeat violators",
+        "helpText": "Ban a user after their second WholesomeShield violation in the subreddit.",
+        "defaultValue": true
+      },
+      "notify_moderators": {
+        "type": "boolean",
+        "label": "Notify moderators in modmail",
+        "helpText": "Create a modmail notification when WholesomeShield detects a violation.",
+        "defaultValue": false
+      },
+      "scan_limit": {
+        "type": "number",
+        "label": "Automatic scan limit",
+        "helpText": "How many recent or unmoderated items to check each automatic scan. Values above 100 are capped.",
+        "defaultValue": 50
+      }
+    }
+  },
   "triggers": {
     "onAppInstall": "/internal/triggers/app-install",
     "onAppUpgrade": "/internal/triggers/app-upgrade",

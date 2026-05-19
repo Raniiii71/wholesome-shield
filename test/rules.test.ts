@@ -156,4 +156,53 @@ describe('moderation workflow', () => {
     expect(state.count).toBe(1);
     expect(actions).toEqual(['remove', 'reply', 'message']);
   });
+
+  it('respects moderator action settings', async () => {
+    const item: ModerationItem = {
+      kind: 'post',
+      id: 't3_settings',
+      subredditName: 'wholesome',
+      authorId: 't2_user',
+      authorName: 'bad_actor',
+      title: 'Follow my onlyfans.com/bad',
+    };
+
+    let state: ViolationState = {
+      count: 0,
+      updatedAt: new Date(0).toISOString(),
+    };
+    const actions: string[] = [];
+    const runtime = {
+      getViolationState: async () => state,
+      saveViolationState: async (_item: ModerationItem, nextState: ViolationState) => {
+        state = nextState;
+      },
+      remove: async () => {
+        actions.push('remove');
+      },
+      reply: async () => {
+        actions.push('reply');
+      },
+      message: async () => {
+        actions.push('message');
+      },
+      ban: async () => {
+        actions.push('ban');
+      },
+      notifyMods: async () => {
+        actions.push('notifyMods');
+      },
+    };
+
+    await moderateItem(item, runtime, {
+      removeContent: false,
+      leaveWarningComment: true,
+      sendPrivateWarning: false,
+      banRepeatViolators: false,
+      notifyModerators: true,
+    });
+
+    expect(state.count).toBe(1);
+    expect(actions).toEqual(['reply', 'notifyMods']);
+  });
 });

@@ -1,7 +1,7 @@
 import { banMessage, privateWarningMessage, publicWarningComment } from './messages';
 import { scanMedia } from './media';
 import { detectRuleViolations } from './rules';
-import type { DetectionResult, ModerationDecision, ModerationItem, ViolationAction, ViolationState } from './types';
+import type { DetectionResult, ModerationDecision, ModerationItem, ViolationAction, ViolationReason, ViolationState } from './types';
 
 export type ModerationRuntime = {
   getViolationState(item: ModerationItem): Promise<ViolationState>;
@@ -10,9 +10,30 @@ export type ModerationRuntime = {
   reply(item: ModerationItem, text: string): Promise<void>;
   message(item: ModerationItem, subject: string, text: string): Promise<void>;
   ban(item: ModerationItem, text: string): Promise<void>;
+  notifyMods?(item: ModerationItem, reasons: ViolationReason[], action: ViolationAction): Promise<void>;
 };
 
-export async function moderateItem(item: ModerationItem, runtime: ModerationRuntime): Promise<ModerationDecision> {
+export type ModerationOptions = {
+  removeContent: boolean;
+  leaveWarningComment: boolean;
+  sendPrivateWarning: boolean;
+  banRepeatViolators: boolean;
+  notifyModerators: boolean;
+};
+
+export const DEFAULT_MODERATION_OPTIONS: ModerationOptions = {
+  removeContent: true,
+  leaveWarningComment: true,
+  sendPrivateWarning: true,
+  banRepeatViolators: true,
+  notifyModerators: false,
+};
+
+export async function moderateItem(
+  item: ModerationItem,
+  runtime: ModerationRuntime,
+  options: ModerationOptions = DEFAULT_MODERATION_OPTIONS
+): Promise<ModerationDecision> {
   const detection = await evaluateItem(item);
 
   if (!detection.shouldRemove) {
@@ -33,20 +54,33 @@ export async function moderateItem(item: ModerationItem, runtime: ModerationRunt
   const nextCount = previousState.count + 1;
   const action: ViolationAction = nextCount >= 2 ? 'ban' : 'warn';
 
-  await runtime.remove(item, detection.isSpam);
-  await runtime.reply(item, publicWarningComment(item, detection.reasons, nextCount));
-  await runtime.message(
-    item,
-    nextCount >= 2 ? 'Final warning from WholesomeShield' : 'Warning from WholesomeShield',
-    privateWarningMessage(item, detection.reasons, nextCount)
-  );
+  if (options.removeContent) {
+    await runtime.remove(item, detection.isSpam);
+  }
+
+  if (options.leaveWarningComment) {
+    await runtime.reply(item, publicWarningComment(item, detection.reasons, nextCount));
+  }
+
+  if (options.sendPrivateWarning) {
+    await runtime.message(
+      item,
+      nextCount >= 2 ? 'Final warning from WholesomeShield' : 'Warning from WholesomeShield',
+      privateWarningMessage(item, detection.reasons, nextCount)
+    );
+  }
+
   await runtime.saveViolationState(item, {
     count: nextCount,
     updatedAt: new Date().toISOString(),
     lastContentId: item.id,
   });
 
-  if (action === 'ban') {
+  if (options.notifyModerators && runtime.notifyMods) {
+    await runtime.notifyMods(item, detection.reasons, action);
+  }
+
+  if (action === 'ban' && options.banRepeatViolators) {
     await runtime.ban(item, banMessage(item, detection.reasons));
   }
 

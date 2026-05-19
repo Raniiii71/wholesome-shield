@@ -6,8 +6,10 @@ import type { MenuItemRequest, UiResponse } from '@devvit/shared';
 import { serve } from '@hono/node-server';
 import { Hono, type Context } from 'hono';
 
-import { moderateItem, type ModerationRuntime } from './server/moderation';
+import { formatReasons } from './server/messages';
+import { moderateItem, type ModerationOptions, type ModerationRuntime } from './server/moderation';
 import { commentFromPayload, isValidModerationItem, postFromPayload } from './server/payload';
+import { getWholesomeShieldSettings } from './server/settings';
 import type { ModerationItem, ViolationState } from './server/types';
 
 const app = new Hono();
@@ -42,7 +44,8 @@ app.post('/internal/menu/shield-check', async (c) => {
     return c.json<UiResponse>({ showToast: 'WholesomeShield could not inspect this item.' }, 200);
   }
 
-  const decision = await moderateItem(item, redditRuntime);
+  const moderationSettings = await getWholesomeShieldSettings();
+  const decision = await moderateItem(item, redditRuntime, moderationOptionsFromSettings(moderationSettings));
   console.log(
     `WholesomeShield menu: ${decision.shouldRemove ? 'removed' : 'allowed'} ${item.kind} ${item.id} by u/${
       item.authorName
@@ -125,7 +128,13 @@ app.post('/internal/cron/scan-subreddit', async (c) => {
     return c.json({ status: 'ignored' }, 200);
   }
 
-  const limit = payload.data?.limit ?? payload.limit ?? DEFAULT_SCAN_LIMIT;
+  const moderationSettings = await getWholesomeShieldSettings();
+  if (!moderationSettings.automatic_moderation) {
+    console.log(`WholesomeShield automatic scan skipped for r/${subredditName}: automatic moderation is off`);
+    return c.json({ status: 'disabled', subredditName }, 200);
+  }
+
+  const limit = moderationSettings.scan_limit;
   const result = await scanSubreddit(subredditName, limit);
 
   console.log(
@@ -146,7 +155,13 @@ async function handleModeration(triggerName: string, item: ModerationItem | unde
     return c.json<TriggerResponse>({ status: 'ignored' }, 200);
   }
 
-  const decision = await moderateItem(item, redditRuntime);
+  const moderationSettings = await getWholesomeShieldSettings();
+  if (!moderationSettings.automatic_moderation) {
+    console.log(`WholesomeShield skipped ${triggerName}: automatic moderation is off for ${item.id}`);
+    return c.json<TriggerResponse>({ status: 'ignored' }, 200);
+  }
+
+  const decision = await moderateItem(item, redditRuntime, moderationOptionsFromSettings(moderationSettings));
   console.log(
     `WholesomeShield ${triggerName}: ${decision.shouldRemove ? 'removed' : 'allowed'} ${item.kind} ${item.id} by u/${
       item.authorName
@@ -216,7 +231,8 @@ async function scanSubreddit(subredditName: string, requestedLimit: number): Pro
     }
 
     try {
-      const decision = await moderateItem(item, redditRuntime);
+      const moderationSettings = await getWholesomeShieldSettings();
+      const decision = await moderateItem(item, redditRuntime, moderationOptionsFromSettings(moderationSettings));
       await rememberScan(memoryKey, fingerprint);
       result.checked += 1;
 
@@ -366,7 +382,44 @@ const redditRuntime: ModerationRuntime = {
       console.error(`WholesomeShield could not ban u/${item.authorName}; continuing after removal/warnings.`, error);
     }
   },
+
+  async notifyMods(item, reasons, action) {
+    if (!item.subredditName) return;
+
+    try {
+      const subreddit = await reddit.getSubredditByName(item.subredditName);
+      const target = item.permalink ? `[View ${item.kind}](${item.permalink})` : `${item.kind} ${item.id}`;
+      await reddit.modMail.createModNotification({
+        subredditId: subreddit.id,
+        subject: `WholesomeShield ${action === 'ban' ? 'repeat violation' : 'violation'}: u/${
+          item.authorName ?? 'unknown'
+        }`,
+        bodyMarkdown: [
+          `WholesomeShield detected unsafe ${item.kind} content in r/${item.subredditName}.`,
+          '',
+          `Author: u/${item.authorName ?? 'unknown'}`,
+          `Action: ${action === 'ban' ? 'final warning / ban path' : 'warning path'}`,
+          `Content: ${target}`,
+          '',
+          'Reasons:',
+          formatReasons(reasons),
+        ].join('\n'),
+      });
+    } catch (error) {
+      console.error(`WholesomeShield could not notify moderators for ${item.kind} ${item.id}; continuing.`, error);
+    }
+  },
 };
+
+function moderationOptionsFromSettings(settings: Awaited<ReturnType<typeof getWholesomeShieldSettings>>): ModerationOptions {
+  return {
+    removeContent: settings.remove_unsafe_content,
+    leaveWarningComment: settings.leave_warning_comment,
+    sendPrivateWarning: settings.send_private_warning,
+    banRepeatViolators: settings.ban_repeat_violators,
+    notifyModerators: settings.notify_moderators,
+  };
+}
 
 function violationKey(item: ModerationItem): string {
   const userKey = item.authorId ?? item.authorName ?? 'unknown';

@@ -21,6 +21,18 @@ You can still use **WholesomeShield** as the public display name in descriptions
 - Clean users are not removed for weak signals like a suspicious username alone.
 - Duplicate triggers for the same content do not count as multiple violations.
 
+## Moderator Settings
+
+Each subreddit installation has settings on the Reddit developer app page. Moderators can configure:
+
+- automatic moderation on or off
+- whether unsafe content is removed
+- whether WholesomeShield leaves a public warning comment
+- whether WholesomeShield sends a private warning message
+- whether repeat violators are banned
+- whether moderators receive a modmail notification
+- the automatic scan limit, capped at 100 items per scan
+
 ## Detection
 
 The app detects:
