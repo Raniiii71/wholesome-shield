@@ -1,0 +1,52 @@
+{
+  "$schema": "https://developers.reddit.com/schema/config-file.v1.json",
+  "name": "wholesome-shield",
+  "server": {
+    "dir": "dist/server",
+    "entry": "index.cjs"
+  },
+  "menu": {
+    "items": [
+      {
+        "label": "Shield Check",
+        "description": "Run WholesomeShield on this post or comment now.",
+        "location": ["post", "comment"],
+        "forUserType": "moderator",
+        "endpoint": "/internal/menu/shield-check"
+      }
+    ]
+  },
+  "triggers": {
+    "onAppInstall": "/internal/triggers/app-install",
+    "onAppUpgrade": "/internal/triggers/app-upgrade",
+    "onPostSubmit": "/internal/triggers/post-submit",
+    "onPostCreate": "/internal/triggers/post-create",
+    "onCommentSubmit": "/internal/triggers/comment-submit",
+    "onCommentCreate": "/internal/triggers/comment-create",
+    "onPostNsfwUpdate": "/internal/triggers/post-nsfw-update",
+    "onPostFlairUpdate": "/internal/triggers/post-flair-update"
+  },
+  "scheduler": {
+    "tasks": {
+      "scan-subreddit": "/internal/cron/scan-subreddit"
+    }
+  },
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite build --watch"
+  },
+  "permissions": {
+    "reddit": {
+      "enable": true,
+      "scope": "moderator"
+    },
+    "redis": true,
+    "http": {
+      "enable": true,
+      "domains": []
+    }
+  },
+  "dev": {
+    "subreddit": "wholesome_shield_dev"
+  }
+}
