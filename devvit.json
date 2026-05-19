@@ -66,7 +66,7 @@
             "value": "off"
           }
         ],
-        "defaultValue": "bans_only"
+        "defaultValue": "all_violations"
       },
       "scan_limit": {
         "type": "number",

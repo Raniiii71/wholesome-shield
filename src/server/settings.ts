@@ -18,7 +18,7 @@ export const DEFAULT_WHOLESOME_SHIELD_SETTINGS: WholesomeShieldSettings = {
   leave_warning_comment: true,
   send_private_warning: true,
   ban_repeat_violators: true,
-  modmail_notifications: 'bans_only',
+  modmail_notifications: 'all_violations',
   scan_limit: 50,
 };
 
