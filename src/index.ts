@@ -6,9 +6,10 @@ import type { MenuItemRequest, UiResponse } from '@devvit/shared';
 import { serve } from '@hono/node-server';
 import { Hono, type Context } from 'hono';
 
+import { cleanPostThankYouComment } from './server/messages';
 import { moderateItem, type ModerationOptions, type ModerationRuntime } from './server/moderation';
 import { commentFromPayload, isValidModerationItem, postFromPayload } from './server/payload';
-import { getWholesomeShieldSettings } from './server/settings';
+import { getWholesomeShieldSettings, type WholesomeShieldSettings } from './server/settings';
 import type { DetectionResult, ModerationItem, ViolationAction, ViolationState } from './server/types';
 
 const app = new Hono();
@@ -16,6 +17,7 @@ const DEFAULT_SCAN_LIMIT = 50;
 const SUBREDDIT_SCAN_CRON = '* * * * *';
 const SCAN_MEMORY_TTL_SECONDS = 7 * 24 * 60 * 60;
 const DAY_MS = 24 * 60 * 60 * 1000;
+const CLEAN_POST_COMMENT_TTL_MS = 30 * DAY_MS;
 
 type ScheduledScanPayload = {
   data?: {
@@ -167,6 +169,11 @@ async function handleModeration(triggerName: string, item: ModerationItem | unde
       item.authorName
     } score=${decision.score} reasons=${decision.reasons.map((reason) => reason.category).join(',') || 'none'}`
   );
+
+  if (!decision.shouldRemove && shouldCommentOnCleanPost(triggerName, item, moderationSettings)) {
+    await commentOnCleanPostOnce(item);
+  }
+
   return c.json<TriggerResponse>(
     {
       status: decision.shouldRemove ? 'ok' : 'ignored',
@@ -411,6 +418,38 @@ function moderationOptionsFromSettings(settings: Awaited<ReturnType<typeof getWh
   };
 }
 
+function shouldCommentOnCleanPost(
+  triggerName: string,
+  item: ModerationItem,
+  settings: WholesomeShieldSettings
+): boolean {
+  return (
+    settings.comment_on_clean_posts &&
+    item.kind === 'post' &&
+    (triggerName === 'post-submit' || triggerName === 'post-create')
+  );
+}
+
+async function commentOnCleanPostOnce(item: ModerationItem): Promise<void> {
+  const markerKey = cleanPostCommentKey(item);
+  const marker = await redis.set(markerKey, new Date().toISOString(), {
+    nx: true,
+    expiration: new Date(Date.now() + CLEAN_POST_COMMENT_TTL_MS),
+  });
+
+  if (marker !== 'OK') {
+    return;
+  }
+
+  try {
+    await redditRuntime.reply(item, cleanPostThankYouComment(item));
+    console.log(`WholesomeShield thanked clean post ${item.id} by u/${item.authorName ?? 'unknown'}`);
+  } catch (error) {
+    await redis.del(markerKey);
+    console.error(`WholesomeShield could not thank clean post ${item.id}; marker cleared for retry.`, error);
+  }
+}
+
 function modmailSubject(item: ModerationItem, action: ViolationAction, banApplied: boolean): string {
   if (action === 'ban') {
     return `WholesomeShield ${banApplied ? 'banned' : 'ban review'}: u/${item.authorName ?? 'unknown'}`;
@@ -552,6 +591,11 @@ function violationKey(item: ModerationItem): string {
 
 function scannerJobKey(subredditName: string): string {
   return `scanner-job:${subredditName}`;
+}
+
+function cleanPostCommentKey(item: ModerationItem): string {
+  const subredditKey = item.subredditName ?? 'unknown';
+  return `clean-post-comment:${subredditKey}:${item.id}`;
 }
 
 function subredditNameFromTrigger(payload: Record<string, unknown>): string | undefined {

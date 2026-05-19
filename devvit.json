@@ -42,6 +42,12 @@
         "helpText": "Send the author a private Reddit warning message after a violation.",
         "defaultValue": true
       },
+      "comment_on_clean_posts": {
+        "type": "boolean",
+        "label": "Comment on clean posts",
+        "helpText": "Leave an automatic thank-you comment on new posts that pass WholesomeShield scanning.",
+        "defaultValue": true
+      },
       "ban_repeat_violators": {
         "type": "boolean",
         "label": "Ban repeat violators",

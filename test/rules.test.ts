@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { cleanPostThankYouComment } from '../src/server/messages';
 import { moderateItem } from '../src/server/moderation';
 import { detectRuleViolations } from '../src/server/rules';
 import type { ModerationItem, ViolationState } from '../src/server/types';
@@ -71,6 +72,17 @@ describe('WholesomeShield rules', () => {
 });
 
 describe('moderation workflow', () => {
+  it('formats the clean post thank-you comment with the author username', () => {
+    const text = cleanPostThankYouComment({
+      kind: 'post',
+      id: 't3_clean',
+      authorName: 'friendly_user',
+    });
+
+    expect(text).toContain('Thank you u/friendly_user for posting on this subreddit!');
+    expect(text).toContain('I am a bot, and this action was performed automatically.');
+  });
+
   it('warns first and bans on the second violation', async () => {
     const item: ModerationItem = {
       kind: 'comment',

@@ -7,6 +7,7 @@ export type WholesomeShieldSettings = {
   remove_unsafe_content: boolean;
   leave_warning_comment: boolean;
   send_private_warning: boolean;
+  comment_on_clean_posts: boolean;
   ban_repeat_violators: boolean;
   modmail_notifications: ModmailNotificationLevel;
   scan_limit: number;
@@ -17,6 +18,7 @@ export const DEFAULT_WHOLESOME_SHIELD_SETTINGS: WholesomeShieldSettings = {
   remove_unsafe_content: true,
   leave_warning_comment: true,
   send_private_warning: true,
+  comment_on_clean_posts: true,
   ban_repeat_violators: true,
   modmail_notifications: 'all_violations',
   scan_limit: 50,
@@ -51,6 +53,10 @@ export function normalizeWholesomeShieldSettings(
     send_private_warning: booleanOrDefault(
       values.send_private_warning,
       DEFAULT_WHOLESOME_SHIELD_SETTINGS.send_private_warning
+    ),
+    comment_on_clean_posts: booleanOrDefault(
+      values.comment_on_clean_posts,
+      DEFAULT_WHOLESOME_SHIELD_SETTINGS.comment_on_clean_posts
     ),
     ban_repeat_violators: booleanOrDefault(
       values.ban_repeat_violators,

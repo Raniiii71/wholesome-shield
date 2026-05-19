@@ -29,6 +29,7 @@ Each subreddit installation has settings on the Reddit developer app page. Moder
 - whether unsafe content is removed
 - whether WholesomeShield leaves a public warning comment
 - whether WholesomeShield sends a private warning message
+- whether WholesomeShield comments on clean new posts
 - whether repeat violators are banned
 - whether moderators receive modmail notifications for every violation, bans only, or neither
 - the automatic scan limit, capped at 100 items per scan

@@ -52,6 +52,16 @@ export function banMessage(item: ModerationItem, reasons: ViolationReason[]): st
   ].join('\n');
 }
 
+export function cleanPostThankYouComment(item: ModerationItem): string {
+  return [
+    `Thank you u/${item.authorName ?? 'there'} for posting on this subreddit! Hope it follows our Rules and Guidelines.`,
+    '',
+    "Thank you for being amazing, y'all and hope everyone has a great day <3",
+    '',
+    'I am a bot, and this action was performed automatically. Please contact the moderators of this subreddit if you have any questions or concerns.',
+  ].join('\n');
+}
+
 export function formatReasons(reasons: ViolationReason[]): string {
   const labels = reasons.slice(0, 3).map((reason) => {
     return reason.evidence ? `${reason.label} (${reason.evidence})` : reason.label;
