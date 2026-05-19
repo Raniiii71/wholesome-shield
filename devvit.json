@@ -48,11 +48,25 @@
         "helpText": "Ban a user after their second WholesomeShield violation in the subreddit.",
         "defaultValue": true
       },
-      "notify_moderators": {
-        "type": "boolean",
-        "label": "Notify moderators in modmail",
-        "helpText": "Create a modmail notification when WholesomeShield detects a violation.",
-        "defaultValue": false
+      "modmail_notifications": {
+        "type": "select",
+        "label": "Modmail notifications",
+        "helpText": "Choose when WholesomeShield should create a moderator notification in modmail.",
+        "options": [
+          {
+            "label": "Ban events only",
+            "value": "bans_only"
+          },
+          {
+            "label": "Every violation",
+            "value": "all_violations"
+          },
+          {
+            "label": "Off",
+            "value": "off"
+          }
+        ],
+        "defaultValue": "bans_only"
       },
       "scan_limit": {
         "type": "number",

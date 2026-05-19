@@ -1,7 +1,14 @@
 import { banMessage, privateWarningMessage, publicWarningComment } from './messages';
 import { scanMedia } from './media';
 import { detectRuleViolations } from './rules';
-import type { DetectionResult, ModerationDecision, ModerationItem, ViolationAction, ViolationReason, ViolationState } from './types';
+import type { ModmailNotificationLevel } from './settings';
+import type { DetectionResult, ModerationDecision, ModerationItem, ViolationAction, ViolationState } from './types';
+
+export type ModeratorNotificationContext = {
+  violationCount: number;
+  banAttempted: boolean;
+  banApplied: boolean;
+};
 
 export type ModerationRuntime = {
   getViolationState(item: ModerationItem): Promise<ViolationState>;
@@ -9,8 +16,13 @@ export type ModerationRuntime = {
   remove(item: ModerationItem, isSpam: boolean): Promise<void>;
   reply(item: ModerationItem, text: string): Promise<void>;
   message(item: ModerationItem, subject: string, text: string): Promise<void>;
-  ban(item: ModerationItem, text: string): Promise<void>;
-  notifyMods?(item: ModerationItem, reasons: ViolationReason[], action: ViolationAction): Promise<void>;
+  ban(item: ModerationItem, text: string): Promise<boolean>;
+  notifyMods?(
+    item: ModerationItem,
+    detection: DetectionResult,
+    action: ViolationAction,
+    context: ModeratorNotificationContext
+  ): Promise<void>;
 };
 
 export type ModerationOptions = {
@@ -18,7 +30,7 @@ export type ModerationOptions = {
   leaveWarningComment: boolean;
   sendPrivateWarning: boolean;
   banRepeatViolators: boolean;
-  notifyModerators: boolean;
+  modmailNotifications: ModmailNotificationLevel;
 };
 
 export const DEFAULT_MODERATION_OPTIONS: ModerationOptions = {
@@ -26,7 +38,7 @@ export const DEFAULT_MODERATION_OPTIONS: ModerationOptions = {
   leaveWarningComment: true,
   sendPrivateWarning: true,
   banRepeatViolators: true,
-  notifyModerators: false,
+  modmailNotifications: 'bans_only',
 };
 
 export async function moderateItem(
@@ -76,12 +88,18 @@ export async function moderateItem(
     lastContentId: item.id,
   });
 
-  if (options.notifyModerators && runtime.notifyMods) {
-    await runtime.notifyMods(item, detection.reasons, action);
+  let banApplied = false;
+  const banAttempted = action === 'ban' && options.banRepeatViolators;
+  if (action === 'ban' && options.banRepeatViolators) {
+    banApplied = await runtime.ban(item, banMessage(item, detection.reasons));
   }
 
-  if (action === 'ban' && options.banRepeatViolators) {
-    await runtime.ban(item, banMessage(item, detection.reasons));
+  if (shouldNotifyModerators(options.modmailNotifications, action, banAttempted) && runtime.notifyMods) {
+    await runtime.notifyMods(item, detection, action, {
+      violationCount: nextCount,
+      banAttempted,
+      banApplied,
+    });
   }
 
   return {
@@ -113,4 +131,16 @@ function combineDetections(...detections: DetectionResult[]): DetectionResult {
 
 function actionForCount(count: number): ViolationAction {
   return count >= 2 ? 'ban' : 'warn';
+}
+
+function shouldNotifyModerators(
+  level: ModmailNotificationLevel,
+  action: ViolationAction,
+  banAttempted: boolean
+): boolean {
+  if (level === 'all_violations') {
+    return true;
+  }
+
+  return level === 'bans_only' && action === 'ban' && banAttempted;
 }

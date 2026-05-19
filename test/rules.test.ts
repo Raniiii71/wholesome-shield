@@ -105,6 +105,7 @@ describe('moderation workflow', () => {
       },
       ban: async () => {
         actions.push('ban');
+        return true;
       },
     };
 
@@ -147,6 +148,7 @@ describe('moderation workflow', () => {
       },
       ban: async () => {
         actions.push('ban');
+        return true;
       },
     };
 
@@ -188,6 +190,7 @@ describe('moderation workflow', () => {
       },
       ban: async () => {
         actions.push('ban');
+        return true;
       },
       notifyMods: async () => {
         actions.push('notifyMods');
@@ -199,7 +202,7 @@ describe('moderation workflow', () => {
       leaveWarningComment: true,
       sendPrivateWarning: false,
       banRepeatViolators: false,
-      notifyModerators: true,
+      modmailNotifications: 'all_violations',
     });
 
     expect(state.count).toBe(1);

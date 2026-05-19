@@ -1,12 +1,14 @@
 import { settings } from '@devvit/settings';
 
+export type ModmailNotificationLevel = 'off' | 'bans_only' | 'all_violations';
+
 export type WholesomeShieldSettings = {
   automatic_moderation: boolean;
   remove_unsafe_content: boolean;
   leave_warning_comment: boolean;
   send_private_warning: boolean;
   ban_repeat_violators: boolean;
-  notify_moderators: boolean;
+  modmail_notifications: ModmailNotificationLevel;
   scan_limit: number;
 };
 
@@ -16,7 +18,7 @@ export const DEFAULT_WHOLESOME_SHIELD_SETTINGS: WholesomeShieldSettings = {
   leave_warning_comment: true,
   send_private_warning: true,
   ban_repeat_violators: true,
-  notify_moderators: false,
+  modmail_notifications: 'bans_only',
   scan_limit: 50,
 };
 
@@ -54,10 +56,7 @@ export function normalizeWholesomeShieldSettings(
       values.ban_repeat_violators,
       DEFAULT_WHOLESOME_SHIELD_SETTINGS.ban_repeat_violators
     ),
-    notify_moderators: booleanOrDefault(
-      values.notify_moderators,
-      DEFAULT_WHOLESOME_SHIELD_SETTINGS.notify_moderators
-    ),
+    modmail_notifications: modmailNotificationLevelOrDefault(values.modmail_notifications),
     scan_limit: clampScanLimit(values.scan_limit),
   };
 }
@@ -69,4 +68,12 @@ function booleanOrDefault(value: unknown, fallback: boolean): boolean {
 function clampScanLimit(value: unknown): number {
   const numericValue = typeof value === 'number' && Number.isFinite(value) ? Math.floor(value) : 50;
   return Math.max(1, Math.min(numericValue, 100));
+}
+
+function modmailNotificationLevelOrDefault(value: unknown): ModmailNotificationLevel {
+  if (value === 'off' || value === 'bans_only' || value === 'all_violations') {
+    return value;
+  }
+
+  return DEFAULT_WHOLESOME_SHIELD_SETTINGS.modmail_notifications;
 }

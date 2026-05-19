@@ -6,16 +6,16 @@ import type { MenuItemRequest, UiResponse } from '@devvit/shared';
 import { serve } from '@hono/node-server';
 import { Hono, type Context } from 'hono';
 
-import { formatReasons } from './server/messages';
 import { moderateItem, type ModerationOptions, type ModerationRuntime } from './server/moderation';
 import { commentFromPayload, isValidModerationItem, postFromPayload } from './server/payload';
 import { getWholesomeShieldSettings } from './server/settings';
-import type { ModerationItem, ViolationState } from './server/types';
+import type { DetectionResult, ModerationItem, ViolationAction, ViolationState } from './server/types';
 
 const app = new Hono();
 const DEFAULT_SCAN_LIMIT = 50;
 const SUBREDDIT_SCAN_CRON = '* * * * *';
 const SCAN_MEMORY_TTL_SECONDS = 7 * 24 * 60 * 60;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 type ScheduledScanPayload = {
   data?: {
@@ -366,7 +366,7 @@ const redditRuntime: ModerationRuntime = {
   },
 
   async ban(item, text) {
-    if (!item.authorName || !item.subredditName) return;
+    if (!item.authorName || !item.subredditName) return false;
 
     try {
       await reddit.banUser({
@@ -378,32 +378,22 @@ const redditRuntime: ModerationRuntime = {
         note: 'Auto-ban after second WholesomeShield violation',
         message: text,
       });
+      return true;
     } catch (error) {
       console.error(`WholesomeShield could not ban u/${item.authorName}; continuing after removal/warnings.`, error);
+      return false;
     }
   },
 
-  async notifyMods(item, reasons, action) {
+  async notifyMods(item, detection, action, context) {
     if (!item.subredditName) return;
 
     try {
       const subreddit = await reddit.getSubredditByName(item.subredditName);
-      const target = item.permalink ? `[View ${item.kind}](${item.permalink})` : `${item.kind} ${item.id}`;
       await reddit.modMail.createModNotification({
         subredditId: subreddit.id,
-        subject: `WholesomeShield ${action === 'ban' ? 'repeat violation' : 'violation'}: u/${
-          item.authorName ?? 'unknown'
-        }`,
-        bodyMarkdown: [
-          `WholesomeShield detected unsafe ${item.kind} content in r/${item.subredditName}.`,
-          '',
-          `Author: u/${item.authorName ?? 'unknown'}`,
-          `Action: ${action === 'ban' ? 'final warning / ban path' : 'warning path'}`,
-          `Content: ${target}`,
-          '',
-          'Reasons:',
-          formatReasons(reasons),
-        ].join('\n'),
+        subject: modmailSubject(item, action, context.banApplied),
+        bodyMarkdown: await modmailBody(item, detection, action, context),
       });
     } catch (error) {
       console.error(`WholesomeShield could not notify moderators for ${item.kind} ${item.id}; continuing.`, error);
@@ -417,8 +407,141 @@ function moderationOptionsFromSettings(settings: Awaited<ReturnType<typeof getWh
     leaveWarningComment: settings.leave_warning_comment,
     sendPrivateWarning: settings.send_private_warning,
     banRepeatViolators: settings.ban_repeat_violators,
-    notifyModerators: settings.notify_moderators,
+    modmailNotifications: settings.modmail_notifications,
   };
+}
+
+function modmailSubject(item: ModerationItem, action: ViolationAction, banApplied: boolean): string {
+  if (action === 'ban') {
+    return `WholesomeShield ${banApplied ? 'banned' : 'ban review'}: u/${item.authorName ?? 'unknown'}`;
+  }
+
+  return `WholesomeShield violation: u/${item.authorName ?? 'unknown'}`;
+}
+
+async function modmailBody(
+  item: ModerationItem,
+  detection: DetectionResult,
+  action: ViolationAction,
+  context: { violationCount: number; banAttempted: boolean; banApplied: boolean }
+): Promise<string> {
+  const profileDetails = await userProfileDetails(item);
+  const target = item.permalink ? `[View ${item.kind}](${item.permalink})` : `${item.kind} ${item.id}`;
+  const actionText =
+    action === 'ban'
+      ? context.banApplied
+        ? 'User banned after repeat violation.'
+        : 'Repeat violation detected, but the ban could not be confirmed.'
+      : 'User warned for first violation.';
+
+  return [
+    '**WholesomeShield moderator notification**',
+    '',
+    `Subreddit: r/${item.subredditName ?? 'unknown'}`,
+    `Action: ${actionText}`,
+    `Violation count: ${context.violationCount}`,
+    `Detection score: ${detection.score}`,
+    `Spam removal flag: ${detection.isSpam ? 'yes' : 'no'}`,
+    `Content: ${target}`,
+    '',
+    '**Matched reasons**',
+    formatDetailedReasons(detection),
+    '',
+    '**Removed content details**',
+    contentDetails(item),
+    '',
+    '**User profile details**',
+    profileDetails,
+  ].join('\n');
+}
+
+async function userProfileDetails(item: ModerationItem): Promise<string> {
+  if (!item.authorName) {
+    return '- Username: unknown';
+  }
+
+  const lines = [`- Username: u/${item.authorName}`, `- Author ID: ${item.authorId ?? 'unknown'}`];
+
+  try {
+    const user = await reddit.getUserByUsername(item.authorName);
+    if (!user) {
+      return [...lines, '- Profile lookup: user not found or inaccessible'].join('\n');
+    }
+
+    const accountAgeDays = Math.max(0, Math.floor((Date.now() - user.createdAt.getTime()) / DAY_MS));
+    lines.push(
+      `- Profile: ${user.url}`,
+      `- Display name: ${emptyAsUnknown(user.displayName)}`,
+      `- Created: ${user.createdAt.toISOString()}`,
+      `- Account age: ${accountAgeDays} days`,
+      `- Link karma: ${user.linkKarma}`,
+      `- Comment karma: ${user.commentKarma}`,
+      `- Combined karma: ${user.linkKarma + user.commentKarma}`,
+      `- Profile marked NSFW: ${yesNo(user.nsfw)}`,
+      `- User allows NSFW: ${yesNo(user.showNsfw)}`,
+      `- Reddit admin: ${yesNo(user.isAdmin)}`,
+      `- Moderator elsewhere: ${yesNo(user.isModerator)}`,
+      `- Reddit Premium: ${yesNo(user.hasRedditPremium)}`,
+      `- Verified email: ${yesNo(user.hasVerifiedEmail)}`,
+      `- About: ${truncateForModmail(emptyAsUnknown(user.about), 500)}`
+    );
+
+    try {
+      const subredditKarma = await user.getUserKarmaFromCurrentSubreddit();
+      lines.push(
+        `- Karma in this subreddit: posts ${subredditKarma.fromPosts ?? 0}, comments ${
+          subredditKarma.fromComments ?? 0
+        }`
+      );
+    } catch (error) {
+      console.error(`WholesomeShield could not read subreddit karma for u/${item.authorName}.`, error);
+      lines.push('- Karma in this subreddit: unavailable');
+    }
+
+    return lines.join('\n');
+  } catch (error) {
+    console.error(`WholesomeShield could not read profile details for u/${item.authorName}.`, error);
+    return [...lines, '- Profile lookup: unavailable'].join('\n');
+  }
+}
+
+function formatDetailedReasons(detection: DetectionResult): string {
+  if (detection.reasons.length === 0) {
+    return '- Unsafe content signal';
+  }
+
+  return detection.reasons
+    .map((reason) => {
+      const evidence = reason.evidence ? ` evidence: ${reason.evidence}` : '';
+      return `- ${reason.label} (${reason.category}, score ${reason.score})${evidence}`;
+    })
+    .join('\n');
+}
+
+function contentDetails(item: ModerationItem): string {
+  return [
+    `- Type: ${item.kind}`,
+    `- ID: ${item.id}`,
+    `- Title: ${truncateForModmail(item.title ?? 'none', 300)}`,
+    `- Body: ${truncateForModmail(item.body ?? 'none', 700)}`,
+    `- URL: ${item.url ?? 'none'}`,
+    `- Flair/tag: ${item.flairText ?? 'none'}`,
+    `- Marked NSFW: ${yesNo(item.nsfw === true)}`,
+    `- Media URLs: ${item.mediaUrls?.length ? item.mediaUrls.join(', ') : 'none'}`,
+  ].join('\n');
+}
+
+function yesNo(value: boolean): string {
+  return value ? 'yes' : 'no';
+}
+
+function emptyAsUnknown(value: string | undefined): string {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : 'unknown';
+}
+
+function truncateForModmail(value: string, maxLength: number): string {
+  return value.length > maxLength ? `${value.slice(0, maxLength - 3)}...` : value;
 }
 
 function violationKey(item: ModerationItem): string {

@@ -30,8 +30,10 @@ Each subreddit installation has settings on the Reddit developer app page. Moder
 - whether WholesomeShield leaves a public warning comment
 - whether WholesomeShield sends a private warning message
 - whether repeat violators are banned
-- whether moderators receive a modmail notification
+- whether moderators receive modmail notifications for bans only, every violation, or neither
 - the automatic scan limit, capped at 100 items per scan
+
+Ban-event modmail includes the author profile, account age, karma, matched reasons, removed content details, and whether the ban was confirmed.
 
 ## Detection
 
